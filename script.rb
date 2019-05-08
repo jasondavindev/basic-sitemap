@@ -69,6 +69,7 @@ class Sitemap
       next unless local?(@data_url_host[:base], data_url)
       next if data_url[:fragment]
 
+      puts url
       visit(url, data_url)
     end
   end
