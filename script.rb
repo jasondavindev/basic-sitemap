@@ -10,8 +10,10 @@ class Sitemap
     @visitados = Set.new
     @data_url_host = get_data_url(base)
     @site_map = {}
+    @emails = Set.new
     get_references(base)
     save!(file_path)
+    puts @emails.to_a.to_s
   end
 
   def get_data_url(url)
@@ -20,7 +22,7 @@ class Sitemap
       uri = URI(url)
       rs = { 'base': uri.host, 'path': uri.path, 'protocol': uri.scheme,
              'fragment': uri.fragment }
-    rescue
+    rescue ArgumentError
       return {}
     end
 
@@ -38,6 +40,14 @@ class Sitemap
     host == data_url[:base]
   end
 
+  def same_path?(data_url)
+    host_path = @data_url_host[:path].split('/')
+    url_path = data_url[:path].split('/')
+    return true if host_path.size.zero?
+
+    host_path == url_path[0..host_path.size - 1]
+  end
+
   def build_full_url(base_url, url)
     return url if %r{^https?:/{2}}.match? url
 
@@ -48,33 +58,53 @@ class Sitemap
     end
   end
 
-  def get_links(url)
-    response = HTTParty.get(url)
-    begin
-      html = Nokogiri::HTML(response)
-    rescue
-      return []
-    end
+  def find_emails(content)
+    emails = content.scan(/[a-zA-Z0-9.!\#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*/)
+    @emails.merge(emails)
+  end
+
+  def get_links(html)
+    return [] unless html
+
     html.css('a')
   end
 
+  def get_html(url)
+    response = HTTParty.get(url)
+
+    begin
+      return Nokogiri::HTML(response)
+    rescue NoMethodError
+      return nil
+    end
+  end
+
+  def valid?(url, data_url)
+    return false unless url
+    return false if @visitados.include? data_url[:path]
+    return false unless local?(@data_url_host[:base], data_url)
+    return false if data_url[:fragment]
+    return false unless same_path?(data_url)
+
+    true
+  end
+
   def get_references(base_url)
-    get_links(base_url).each do |o|
+    html = get_html(base_url)
+    get_links(html).each do |o|
       next unless o['href']
 
       url = build_full_url(base_url, o['href'])
       data_url = get_data_url(url)
-      next unless url
-      next if @visitados.include? data_url[:path]
-      next unless local?(@data_url_host[:base], data_url)
-      next if data_url[:fragment]
+      next unless valid?(url, data_url)
+      find_emails(html.to_s)
 
-      puts url
       visit(url, data_url)
     end
   end
 
   def visit(url, data_url)
+    puts url
     @visitados.add(data_url[:path])
     field_hash(data_url)
     get_references url
