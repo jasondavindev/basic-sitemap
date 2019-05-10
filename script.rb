@@ -6,14 +6,15 @@ require 'set'
 
 # Sitemap
 class Sitemap
-  def initialize(base, file_path)
+  def initialize(base, file_path, find_same_path = false)
     @visitados = Set.new
     @data_url_host = get_data_url(base)
     @site_map = {}
     @emails = Set.new
+    @link_emails = {}
+    @find_same_path = find_same_path
     get_references(base)
     save!(file_path)
-    puts @emails.to_a.to_s
   end
 
   def get_data_url(url)
@@ -22,7 +23,7 @@ class Sitemap
       uri = URI(url)
       rs = { 'base': uri.host, 'path': uri.path, 'protocol': uri.scheme,
              'fragment': uri.fragment }
-    rescue ArgumentError
+    rescue
       return {}
     end
 
@@ -53,14 +54,16 @@ class Sitemap
 
     begin
       URI.join(base_url, url).to_s
-    rescue URI::InvalidURIError
+    rescue
       return nil
     end
   end
 
-  def find_emails(content)
-    emails = content.scan(/[a-zA-Z0-9.!\#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*/)
+  def find_emails(url, content)
+    emails = content.scan(/[\w+\.?]+@[a-z0-9]+[\.[a-z0-9]+]*\.[a-z]+/i)
+    tmp_emails = Set.new(emails.reject { |o| @emails.include? o }).to_a
     @emails.merge(emails)
+    @link_emails[url] = tmp_emails if tmp_emails.size.positive?
   end
 
   def get_links(html)
@@ -70,11 +73,10 @@ class Sitemap
   end
 
   def get_html(url)
-    response = HTTParty.get(url)
-
     begin
+      response = HTTParty.get(url)
       return Nokogiri::HTML(response)
-    rescue NoMethodError
+    rescue
       return nil
     end
   end
@@ -84,7 +86,7 @@ class Sitemap
     return false if @visitados.include? data_url[:path]
     return false unless local?(@data_url_host[:base], data_url)
     return false if data_url[:fragment]
-    return false unless same_path?(data_url)
+    return false if !same_path?(data_url) && @find_same_path
 
     true
   end
@@ -97,7 +99,8 @@ class Sitemap
       url = build_full_url(base_url, o['href'])
       data_url = get_data_url(url)
       next unless valid?(url, data_url)
-      find_emails(html.to_s)
+
+      find_emails(base_url, html.to_s)
 
       visit(url, data_url)
     end
@@ -123,9 +126,14 @@ class Sitemap
   end
 
   def save!(file_path)
-    @file = File.open(file_path + '/result.json', 'w')
-    @file.puts(@site_map.to_json)
-    @file.close
+    save_in_file(file_path + '/routes.json', @site_map.to_json)
+    save_in_file(file_path + '/emails.json', @link_emails.to_json)
+  end
+
+  def save_in_file(path, content)
+    file = File.open(path, 'w')
+    file.puts(content)
+    file.close
   end
 end
 
