@@ -14,7 +14,8 @@ class Sitemap
     @link_emails = {}
     @find_same_path = find_same_path
     @sleep_time = sleep_time.to_i
-    get_references(base)
+    @references_queue = []
+    init(base)
     save!(file_path)
   end
 
@@ -29,6 +30,56 @@ class Sitemap
     end
 
     rs
+  end
+
+  def init(url)
+    data_url = get_data_url(url)
+    @references_queue.push([url, data_url])
+    run_search
+  end
+
+  def run_search
+    while @references_queue.size.positive?
+      reference = @references_queue.shift
+      visit(*reference)
+    end
+  end
+
+  def visit(url, data_url)
+    puts url
+    @visiteds.add(data_url[:path])
+    field_hash(data_url)
+    search url
+    sleep @sleep_time
+  end
+
+  def search(base_url)
+    html = get_html(base_url)
+    find_emails(base_url, html.to_s)
+
+    get_links(html).each do |o|
+      next unless o['href']
+
+      url = build_full_url(base_url, o['href'])
+      data_url = get_data_url(url)
+      next unless valid?(url, data_url)
+
+      @visiteds.add(data_url[:path])
+      puts "adicionado ---> #{url}"
+      @references_queue.push([url, data_url])
+    end
+  end
+
+  def field_hash(data_url)
+    path = data_url[:path].split('/')
+    hash = @site_map
+    path.each do |o|
+      field_name = '/' + o
+      hash[field_name] = {} unless hash[field_name]
+      hash = hash[field_name]
+    end
+
+    hash
   end
 
   def get_hash_name(data_url)
@@ -87,45 +138,9 @@ class Sitemap
     return false if @visiteds.include? data_url[:path]
     return false unless local?(@data_url_host[:base], data_url)
     return false if data_url[:fragment]
-    return false if !same_path?(data_url) && @find_same_path
+    return false if @find_same_path && !same_path?(data_url)
 
     true
-  end
-
-  def get_references(base_url)
-    html = get_html(base_url)
-    get_links(html).each do |o|
-      next unless o['href']
-
-      url = build_full_url(base_url, o['href'])
-      data_url = get_data_url(url)
-      next unless valid?(url, data_url)
-
-      find_emails(base_url, html.to_s)
-
-      puts "from #{base_url} | to #{url}"
-      visit(url, data_url)
-    end
-  end
-
-  def visit(url, data_url)
-    # puts url
-    @visiteds.add(data_url[:path])
-    field_hash(data_url)
-    sleep @sleep_time
-    get_references url
-  end
-
-  def field_hash(data_url)
-    path = data_url[:path].split('/')
-    hash = @site_map
-    path.each do |o|
-      field_name = '/' + o
-      hash[field_name] = {} unless hash[field_name]
-      hash = hash[field_name]
-    end
-
-    hash
   end
 
   def save!(file_path)
