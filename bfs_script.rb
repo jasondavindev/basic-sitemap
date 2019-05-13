@@ -6,7 +6,7 @@ require 'set'
 
 # Sitemap
 class Sitemap
-  def initialize(base, file_path, find_same_path = false, sleep_time = 0)
+  def initialize(base, file_path, find_same_path = false, sleep_time = 0, name)
     @visiteds = Set.new
     @data_url_host = get_data_url(base)
     @site_map = {}
@@ -15,6 +15,7 @@ class Sitemap
     @find_same_path = find_same_path
     @sleep_time = sleep_time.to_i
     @references_queue = []
+    @name = name
     init(base)
     save!(file_path)
   end
@@ -62,9 +63,9 @@ class Sitemap
 
       url = build_full_url(base_url, o['href'])
       data_url = get_data_url(url)
-      next unless valid?(url, data_url)
+      next unless valid?(url, data_url, o['href'])
 
-      @visiteds.add(data_url[:path])
+      @visiteds.add(o['href'])
       puts "adicionado ---> #{url}"
       @references_queue.push([url, data_url])
     end
@@ -133,9 +134,9 @@ class Sitemap
     end
   end
 
-  def valid?(url, data_url)
+  def valid?(url, data_url, href)
     return false unless url
-    return false if @visiteds.include? data_url[:path]
+    return false if @visiteds.include? href
     return false unless local?(@data_url_host[:base], data_url)
     return false if data_url[:fragment]
     return false if @find_same_path && !same_path?(data_url)
@@ -144,8 +145,8 @@ class Sitemap
   end
 
   def save!(file_path)
-    save_in_file(file_path + '/routes.json', @site_map.to_json)
-    save_in_file(file_path + '/emails.json', @link_emails.to_json)
+    save_in_file("#{file_path}/#{@name}_routes.json", @site_map.to_json)
+    save_in_file("#{file_path}/#{@name}_emails.json", @link_emails.to_json)
   end
 
   def save_in_file(path, content)
@@ -155,4 +156,4 @@ class Sitemap
   end
 end
 
-Sitemap.new(ENV['site'], ENV['path'], ENV['same_path'], ENV['sleep_time'])
+Sitemap.new(ENV['site'], ENV['path'], ENV['same_path'], ENV['sleep_time'], ENV['name'])
