@@ -3,7 +3,9 @@ Script para mapear as rotas de um site
 
 ### Run
 
+- **name**: prefixo no nome do arquivo output
+- **sleep_time**: tempo entre cada requisição (**inteiro**)
 - **site**: url do site
 - **path**: arquivo output
 
-site='http://example.com/' path='./' ruby script.rb
+name='example' sleep_time=1 site='http://example.com/' path='./' ruby script.rb
