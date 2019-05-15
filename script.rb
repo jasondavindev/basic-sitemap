@@ -113,7 +113,13 @@ class Sitemap
   end
 
   def find_emails(url, content)
-    emails = content.scan(/[\w+\.?]+@[a-z0-9]+[\.[a-z0-9]+]*\.[a-z]+/i)
+    emails = []
+    begin
+      emails = content.scan(/[\w+\.?]+@[a-z0-9]+[\.[a-z0-9]+]*\.[a-z]+/i)
+    rescue
+      puts '[ERROR] Find Emails'
+    end
+
     tmp_emails = Set.new(emails.reject { |o| @emails.include? o }).to_a
     @emails.merge(emails)
     @link_emails[url] = tmp_emails if tmp_emails.size.positive?
@@ -134,8 +140,13 @@ class Sitemap
     end
   end
 
+  def media?(href)
+    /jpeg|mp4|pdf|png|jpg/.match? href.split('.')[-1]
+  end
+
   def valid?(url, data_url, href)
     return false unless url
+    return false if media? href
     return false if @visiteds.include? href
     return false unless local?(@data_url_host[:base], data_url)
     return false if data_url[:fragment]
