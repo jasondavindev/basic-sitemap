@@ -66,6 +66,8 @@ class Sitemap
       next unless valid?(url, data_url, o['href'])
 
       @visiteds.add(o['href'])
+      @visiteds.add(data_url[:path])
+
       puts "adicionado ---> #{url}"
       @references_queue.push([url, data_url])
     end
@@ -133,7 +135,7 @@ class Sitemap
 
   def get_html(url)
     begin
-      response = HTTParty.get(url)
+      response = HTTParty.get(url, timeout: 5)
       return Nokogiri::HTML(response)
     rescue
       return nil
@@ -141,13 +143,14 @@ class Sitemap
   end
 
   def media?(href)
-    /jpeg|mp4|pdf|png|jpg/.match? href.split('.')[-1]
+    /jpeg|mp4|pdf|png|jpg/i.match? href.split('.')[-1]
   end
 
   def valid?(url, data_url, href)
     return false unless url
     return false if media? href
     return false if @visiteds.include? href
+    return false if @visiteds.include? data_url[:path]
     return false unless local?(@data_url_host[:base], data_url)
     return false if data_url[:fragment]
     return false if @find_same_path && !same_path?(data_url)
