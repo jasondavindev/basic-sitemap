@@ -4,42 +4,55 @@ require 'nokogiri'
 require 'httparty'
 require 'set'
 
+def red(text) puts "\e[31m#{text}\e[0m" end
+def green(text) puts "\e[32m#{text}\e[0m" end
+
 # Sitemap
 class Sitemap
-  def initialize(base, file_path, find_same_path = false, sleep_time = 0, name)
-    @visiteds = Set.new
-    @data_url_host = get_data_url(base)
-    @site_map = {}
-    @emails = Set.new
-    @link_emails = {}
+  def initialize(site_url:, output_path:, find_same_path: false, sleep_time: 0, name:)
+    @data_url_host = get_data_url(site_url)
     @find_same_path = find_same_path
     @sleep_time = sleep_time.to_i
-    @references_queue = []
     @name = name
-    init(base)
-    save!(file_path)
+    bootstrap(site_url)
+    save!(output_path)
+  end
+
+  def init_values
+    @visiteds = Set.new
+    @routes = {}
+    @emails = Set.new
+    @link_emails = {}
+    @references_queue = []
+  end
+
+  def bootstrap(url)
+    init_values
+    data_url = get_data_url(url)
+    enqueue_reference(url, data_url)
+    start_find
+  end
+
+  def enqueue_reference(url, data_url)
+    green("added URL ---> #{url}")
+    @references_queue.push([url, data_url])
   end
 
   def get_data_url(url)
     rs = {}
     begin
       uri = URI(url)
-      rs = { 'base': uri.host, 'path': uri.path, 'protocol': uri.scheme,
+      rs = { 'host': uri.host, 'path': uri.path, 'protocol': uri.scheme,
              'fragment': uri.fragment }
     rescue
+      red("[ERROR] get data url -> #{url}")
       return {}
     end
 
     rs
   end
 
-  def init(url)
-    data_url = get_data_url(url)
-    @references_queue.push([url, data_url])
-    run_search
-  end
-
-  def run_search
+  def start_find
     while @references_queue.size.positive?
       reference = @references_queue.shift
       visit(*reference)
@@ -49,51 +62,45 @@ class Sitemap
   def visit(url, data_url)
     puts url
     @visiteds.add(data_url[:path])
-    field_hash(data_url)
-    search url
+    create_route_hash(data_url)
+    explore_url(url)
     sleep @sleep_time
   end
 
-  def search(base_url)
+  def add_to_visiteds(href, path)
+    @visiteds.add(href)
+    @visiteds.add(path)
+  end
+
+  def explore_url(base_url)
     html = get_html(base_url)
     find_emails(base_url, html.to_s)
 
-    get_links(html).each do |o|
-      next unless o['href']
+    get_links(html).each do |link|
+      next unless link['href']
 
-      url = build_full_url(base_url, o['href'])
+      href = link['href']
+      url = build_full_url(base_url, href)
       data_url = get_data_url(url)
-      next unless valid?(url, data_url, o['href'])
+      next unless valid?(url, data_url, href)
 
-      @visiteds.add(o['href'])
-      @visiteds.add(data_url[:path])
-
-      puts "adicionado ---> #{url}"
-      @references_queue.push([url, data_url])
+      add_to_visiteds(href, data_url[:path])
+      enqueue_reference(url, data_url)
     end
   end
 
-  def field_hash(data_url)
-    path = data_url[:path].split('/')
-    hash = @site_map
-    path.each do |o|
-      field_name = '/' + o
-      hash[field_name] = {} unless hash[field_name]
-      hash = hash[field_name]
+  def create_route_hash(data_url)
+    paths = data_url[:path].split('/')
+    hash = @routes
+    paths.each do |path|
+      path_name = '/' + path
+      hash[path_name] = {} unless hash[path_name]
+      hash = hash[path_name]
     end
-
-    hash
-  end
-
-  def get_hash_name(data_url)
-    name = data_url[:path].split('/')[0..-2].join('/')
-    return '/' if name.empty?
-
-    name
   end
 
   def local?(host, data_url)
-    host == data_url[:base]
+    host == data_url[:host]
   end
 
   def same_path?(data_url)
@@ -110,6 +117,7 @@ class Sitemap
     begin
       URI.join(base_url, url).to_s
     rescue
+      red("[ERROR] build full url -> #{base_url} | #{url}")
       return nil
     end
   end
@@ -119,7 +127,7 @@ class Sitemap
     begin
       emails = content.scan(/[\w+\.?]+@[a-z0-9]+[\.[a-z0-9]+]*\.[a-z]+/i)
     rescue
-      puts '[ERROR] Find Emails'
+      red("[ERROR] find emails -> #{url}")
     end
 
     tmp_emails = Set.new(emails.reject { |o| @emails.include? o }).to_a
@@ -138,6 +146,7 @@ class Sitemap
       response = HTTParty.get(url, timeout: 5)
       return Nokogiri::HTML(response)
     rescue
+      red("[ERROR] get html -> #{url}")
       return nil
     end
   end
@@ -148,19 +157,20 @@ class Sitemap
 
   def valid?(url, data_url, href)
     return false unless url
-    return false if media? href
-    return false if @visiteds.include? href
-    return false if @visiteds.include? data_url[:path]
-    return false unless local?(@data_url_host[:base], data_url)
+    return false if data_url.compact == {}
+    return false if media?(href)
+    return false if @visiteds.include?(href)
+    return false if @visiteds.include?(data_url[:path])
+    return false unless local?(@data_url_host[:host], data_url)
     return false if data_url[:fragment]
     return false if @find_same_path && !same_path?(data_url)
 
     true
   end
 
-  def save!(file_path)
-    save_in_file("#{file_path}/#{@name}_routes.json", @site_map.to_json)
-    save_in_file("#{file_path}/#{@name}_emails.json", @link_emails.to_json)
+  def save!(output_path)
+    save_in_file("#{output_path}/#{@name}_routes.json", @routes.to_json)
+    save_in_file("#{output_path}/#{@name}_emails.json", @link_emails.to_json)
   end
 
   def save_in_file(path, content)
@@ -170,4 +180,10 @@ class Sitemap
   end
 end
 
-Sitemap.new(ENV['site'], ENV['path'], ENV['same_path'], ENV['sleep_time'], ENV['name'])
+Sitemap.new(
+  site_url: ENV['site'],
+  output_path: ENV['path'],
+  find_same_path: ENV['same_path'],
+  sleep_time: ENV['sleep_time'],
+  name: ENV['name']
+)
